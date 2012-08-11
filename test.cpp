@@ -344,7 +344,7 @@ int main(int argc, char* argv[]) {
     // cout << "max value at " << distance(zdata.begin(), max_element(zdata.begin(), zdata.end()));
     // cout << "Resonant frequency at " << fdata[zmax_idx] << endl;
 
-    int zhalf = zmax - (zmax - z0)/2;
+    double  zhalf = zmax - (zmax - z0)/2;
     int zhalf_idx1; int zhalf_idx2;
     zhalf_idx1 = 0;
     zhalf_idx2 = 0;
