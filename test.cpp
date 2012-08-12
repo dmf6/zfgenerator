@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
     
     for (int j = 0; j < (int)((Nfft/2)); j++){
             /* normalize frequency values by duration */
-        freq[j] = 2*(fs/2*linspace[j]);
+        freq[j] = fs/2*linspace[j];
             //cout << j << "\t" << freq[j] << endl;
         if (freq[j] <= FMIN) {
             fmin_idx = j;
