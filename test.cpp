@@ -48,12 +48,12 @@ int main(int argc, char* argv[]) {
         cout << "Cannot open file!" << endl;
     }
         /* check that we are reading in current and voltage correctly */
-    // ofstream mysignal ("mysignal.dat");
-    // for (int j = 0; j < tin.size(); j++) {
-    //     mysignal << tin[j] << " " << iin[j] << " " << vin[j] << "\n";
-    // }
-    // mysignal << endl;
-    // mysignal.close();
+    ofstream mysignal ("mysignal.dat");
+    for (int j = 0; j < tin.size(); j++) {
+        mysignal << tin[j] << " " << iin[j] << " " << vin[j] << "\n";
+    }
+    mysignal << endl;
+    mysignal.close();
     
         /* number of elements is i...we counted as we insert into array */
     N=tin.size();
@@ -70,7 +70,6 @@ int main(int argc, char* argv[]) {
     double dt = tin[2] - tin[1]; /* sampling frequency */
     double T = N*dt;
     double fs = N/(T/1000);
-
     int Nfft =  pow( 2, ceil( log( N) / log( 2 ) ) );
     
         /* USE MAX NUMBER OF THREADS IN THE SYSTEM TO PRODUCE DFT */
@@ -209,14 +208,18 @@ int main(int argc, char* argv[]) {
      ofstream myfile2, myfile3;
      myfile2.open (a1);
      myfile3.open(a3);
-     vector<double> fdata (NUM_POINTS, 0);
-     vector<double> zdata (NUM_POINTS, 0);
-     vector<double> pdata (NUM_POINTS, 0);
-     fit_data(myfile2, newF, newZ, fdata, zdata, n);
-     fit_data(myfile3, newF, newP, fdata, pdata, n);
+     double *fd = new double[NUM_POINTS];
+     double *zd = new double[NUM_POINTS];
+     double *pd = new double[NUM_POINTS];
+     
+     // vector<double> pdata (NUM_POINTS, 0);
+     fit_data(myfile2, newF, newZ, fd, zd, n);
+     fit_data(myfile3, newF, newP, fd, pd, n);
+         
      myfile2.close();
      myfile3.close();
-     
+     vector<double> fdata (fd, fd + NUM_POINTS);
+     vector<double> zdata (zd, zd + NUM_POINTS);
         /* now measure the z-f profile and write the stats to a file */
      double zmax, z0, q, z10;
      zmax = *max_element(zdata.begin(), zdata.end());
@@ -262,7 +265,11 @@ int main(int argc, char* argv[]) {
          // cout << "raw zf data can be found in " << a << endl;
          // cout << "Smoothed zf data can be found in " << a1 << endl;
          // cout << "zf stats  (zmax, fmax, q, z10, fhalfwidth) for this profile can be found in " << a2 << endl;
-     
+            delete [] fd;
+            delete [] zd;
+            delete [] pd;
+            
+            
     return 0;
 }
 
@@ -270,7 +277,7 @@ int main(int argc, char* argv[]) {
      * like to access the fit vectors afterward so we can extract
      * statistics
      */
-void fit_data(ostream &os, vector<double> &a, vector<double> &b, vector<double> &cvec, vector<double> &dvec, int n) {
+void fit_data(ostream &os, vector<double> &a, vector<double> &b, double *cvec, double *dvec, int n) {
     const size_t ncoeffs = NCOEFFS;
     const size_t nbreak = NBREAK;
 
@@ -300,6 +307,9 @@ void fit_data(ostream &os, vector<double> &a, vector<double> &b, vector<double> 
     mw = gsl_multifit_linear_alloc(n, ncoeffs);
     
     double z, f, zi, sigma;
+    // for (int j = 0; j < a.size(); j++) {
+    //     cout << b[j] << "\n";
+    // }
     
         /* this is the z-f data to be fitted */
     for (int i = 0; i < n; i++) {
@@ -347,7 +357,10 @@ void fit_data(ostream &os, vector<double> &a, vector<double> &b, vector<double> 
         cvec[i] = xi;
         dvec[i] = yi;
     }
-     gsl_rng_free(r);
+    os << endl;
+    
+
+    gsl_rng_free(r);
     gsl_bspline_free(bw);
     gsl_vector_free(B);
     gsl_vector_free(x);
