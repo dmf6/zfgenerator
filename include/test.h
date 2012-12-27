@@ -29,7 +29,7 @@
 
 /* B-spline constants */
 /* number of fit coefficients */
-#define NCOEFFS  30
+#define NCOEFFS  50
 #define SPLINE_ORDER 3
     /* nbreak = ncoeffs + 2 - k = ncoeffs - 2 since k = 4 */
 #define NBREAK   (NCOEFFS + 2 - SPLINE_ORDER)
@@ -38,11 +38,10 @@
 using namespace std;
 
 inline int nextpow2(int x);
-inline double average(double *array, int N);
-inline void subtract(double *array, int N, float value);
-void fit_data(ostream &os, vector<double> &a, vector<double> &b, vector<double> &c, vector<double> &d, int n);
+
 inline double average(vector<double> *vec);
 inline  void subtract(vector<double> *vec, double value);
+void fit_data(ostream &os, vector<double> &a, vector<double> &b, double *cvec, double *dvec, int n);
 
                                   
 #endif
