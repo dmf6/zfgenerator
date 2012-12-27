@@ -1,18 +1,30 @@
-export CC = g++
-export RM= rm -f
-export MAKE= make
-CPPFLAGS = -Wall -g -O
-LIBS = -lgsl -lgslcblas -lfftw3  -L/usr/lib64/mysql -lmysqlcppconn 
-INCLUDES = -I/usr/include/mysql
-OBJECTS = test.o
-MYAPP = zfgenerator
+SHELL = /bin/sh
+CC = g++
+LIBS = -lgsl -lgslcblas -lfftw3 -lfftw3_omp -lm  -fopenmp
+CPPFLAGS = -g -O2 -Wall
 
-all: $(MYAPP)
+VPATH=%.h ./include
+VPATH=%.o ./obj
 
-${MYAPP} : $(OBJECTS)
-	${CC} -o $(MYAPP) ${OBJECTS} ${CPPFLAGS} ${LIBS} 
+OBJDIR = ./obj
+INCLUDE_DIR = ./include
+INCLUDES  := $(addprefix -I,$(INCLUDE_DIR))
 
-%.o : %.cpp
-	${CC} ${CPPFLAGS} ${LIBS} ${INCLUDES} -c $^ -o $@
+objects = $(addprefix $(OBJDIR)/, test.o)
+
+MY_APPS = zfgenerator
+
+$(MY_APPS) : $(objects)
+	${CC} -o ${MY_APPS} ${objects} ${CPPFLAGS} ${LIBS}
+
+$(OBJDIR)/%.o: %.cpp
+	$(CC) -c $(CPPFLAGS) ${LIBS} ${INCLUDES} $< -o $@
+
+
+$(OBJDIR):
+	mkdir $(OBJDIR)
+
+.PHONY : clean
 clean:
-	$(RM) ${OBJECTS} $(MYAPP)
+	rm -f ${MY_APPS}
+	rm -f ${objects}

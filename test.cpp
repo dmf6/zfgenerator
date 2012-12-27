@@ -1,73 +1,4 @@
-#include <iostream>
-#include <vector>
-#include <iterator>
-#include <algorithm>
-#include "math.h"
-#include <cmath>
-#include <fstream>
-#include <fftw3.h>
-#include <string>
-#include <string.h>
-#include <sstream>
-#include <iomanip>
-#include <gsl/gsl_errno.h>
-/* smoothing basis spline (B-spline) */
-#include <gsl/gsl_bspline.h>
-#include <gsl/gsl_multifit.h>
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_randist.h>
-#include <gsl/gsl_statistics.h>
-
-
-using namespace std;
-
-#define FMIN 0.1
-#define FMAX 4.0
-
-/* B-spline constants */
-
-    /* number of fit coefficients */
-#define NCOEFFS  12
-     
-    /* nbreak = ncoeffs + 2 - k = ncoeffs - 2 since k = 4 */
-#define NBREAK   (NCOEFFS - 2)
-
-
-inline int nextpow2(int x);
-inline double average(double *array, int N);
-inline void subtract(double *array, int N, float value);
-
-inline double average(vector<double> *vec) {
-    vector<double>::iterator it;
-    double sum = 0.0;
-    
-    for ( it=vec->begin() ; it < vec->end(); it++ ) {
-        sum += *it;
-     }
-    return sum/(vec->size());
-}
-
-inline  void subtract(vector<double> *vec, double value) {
-    for (int i = 0; i < (int)(vec->size()); i++) {
-        vec->at(i) -= value;
-    } 
-}
-
-/// Round up to next higher power of 2 (return x if it's already a power
-/// of 2).
-inline int nextpow2(int x) {
-    if (x < 0)
-        return 0;
-    --x;
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    x |= x >> 8;
-    x |= x >> 16;
-    return x+1;
-}
-
-#define PI 3.1415926f
+#include "test.h"
 
 
 /* program calaculates impedance data using fftw3 */
@@ -116,12 +47,18 @@ int main(int argc, char* argv[]) {
     } else {
         cout << "Cannot open file!" << endl;
     }
-
+        /* check that we are reading in current and voltage correctly */
+    // ofstream mysignal ("mysignal.dat");
+    // for (int j = 0; j < tin.size(); j++) {
+    //     mysignal << tin[j] << " " << iin[j] << " " << vin[j] << "\n";
+    // }
+    // mysignal << endl;
+    // mysignal.close();
+    
         /* number of elements is i...we counted as we insert into array */
     N=tin.size();
     myfile.close();
-    
-        //cout << N << endl;
+
     delete [] buff;
     
     double vv = average(&vin);
@@ -133,24 +70,80 @@ int main(int argc, char* argv[]) {
     double dt = tin[2] - tin[1]; /* sampling frequency */
     double T = N*dt;
     double fs = N/(T/1000);
+
+    int Nfft =  pow( 2, ceil( log( N) / log( 2 ) ) );
     
-    int Nfft = nextpow2(N);
+        /* USE MAX NUMBER OF THREADS IN THE SYSTEM TO PRODUCE DFT */
+     fftw_plan_with_nthreads(omp_get_max_threads());
+     
+           /* http://www.fftw.org/doc/The-1d-Real_002ddata-DFT.html#The-1d-Real_002ddata-DFT */
+        //take FFT of voltage
+    fftw_complex *vout;
+    vout = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * (Nfft/2+1));
+    fftw_plan p1;
+    p1= fftw_plan_dft_r2c_1d(N,&vin[0], vout, FFTW_ESTIMATE);
+    fftw_execute(p1);
+
+/* take FFT of current */
+    fftw_complex *iout;
+    iout = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * ((Nfft/2)+1));
+    fftw_plan p2;
+    p2= fftw_plan_dft_r2c_1d(N,&iin[0], iout,FFTW_ESTIMATE);
+    fftw_execute(p2);
     
-    double *freq, *linspace;
+    /* cool STL resizing of an array using vectors */
+    vector<double> Is(Nfft/2+1);
+    vector<double> Vs(Nfft/2+1);
+   
+    double *zpower, *phase, vpower, ipower, vphase, iphase;
+    zpower = new double[Nfft/2+1];
+    phase = new double[Nfft/2+1];
+    double vre, vim, ire, iim;
+    
+    for (int i = 0; i < Nfft/2+1; i++) {
+        vre = (vout[i][0]);
+        vim = (vout[i][1]);
+        vpower = (sqrt((pow(vre, 2)) + (pow(vim, 2))))/N;
+        
+        ire = (iout[i][0]);
+        iim = (iout[i][1]);
+        ipower = (sqrt((pow(ire, 2)) + (pow(iim, 2))))/N;
+        Vs[i] = vpower;
+        Is[i] = ipower;
+        
+        if (Nfft % 2 == 0) {
+            if (i > 0&& i < Nfft/2) {
+                Vs[i] = vpower*2;
+                Is[i] = ipower*2;
+            }
+        }
+        else {
+            if (i > 0) {
+                Vs[i] = vpower*2;
+                Is[i] = ipower*2;
+            }
+        }
+        
+        zpower[i]  = Vs[i]/Is[i];
+        vphase = atan(vim/vre);
+        iphase = atan(iim/ire);
+        phase[i] = vphase - iphase;
+    }
+    
     int fmax_idx, fmin_idx;
     fmax_idx = 0; fmin_idx=0;
     
-    
-    freq = new double[(int)(2*(Nfft/2+1))];
-    linspace = new double[(int)(2*(Nfft/2+1))];
+    double *freq, *linspace;
+    freq = new double[(int)((Nfft/2+1))];
+    linspace = new double[(int)((Nfft/2+1))];
 
-        /* implementation of MATLAB linspace function */
-    for (int i = 0; i < (int)(2*(Nfft/2)); i++){
-        linspace[i] =  (double) i/(Nfft/2);
-            //cout << linspace[i] <<  "\t" << i << endl;
+        /* create NFFT/2+1 numbers from 0 to 1 */
+    for (int i = 0; i < (int) (Nfft/2+1); i++){
+            // cout << "linspace element " << i << " is " << ((double) i)/(N/2+1) << endl;
+        linspace[i] =  ((double) i)/(N/2+1);
     }
-    
-    for (int j = 0; j < (int)((Nfft/2)); j++){
+   
+    for (int j = 0; j < (int)((Nfft/2+1)); j++){
             /* normalize frequency values by duration */
         freq[j] = fs/2*linspace[j];
             //cout << j << "\t" << freq[j] << endl;
@@ -162,68 +155,43 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
-      
-//         /* http://www.fftw.org/doc/The-1d-Real_002ddata-DFT.html#The-1d-Real_002ddata-DFT */
-    /* take FFT of voltage */
-    fftw_complex *vout;
-    vout = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * 2*((Nfft/2)+1));
-    fftw_plan p1;
-    p1= fftw_plan_dft_r2c_1d(N,&vin[0],vout, FFTW_ESTIMATE);
-    fftw_execute(p1);
-
-// /* take FFT of current */
-    fftw_complex *iout;
-    iout = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * 2*((Nfft/2)+1));
-    fftw_plan p2;
-    p2= fftw_plan_dft_r2c_1d(N,&iin[0],iout,FFTW_ESTIMATE);
-    fftw_execute(p2);
-  
-  /* file name manipulation */
-    char str1[20], str2[20], str3[20];
+     
+  // /* file name manipulation */
+    char str1[20], str2[20], str3[20] ,str4[20];
     
     strcpy (str1, "_raw.dat");
-    strcpy (str2, "_fit.dat");
+    strcpy (str2, "_zfit.dat");
     strcpy (str3, "_zfstats.dat");
+    strcpy (str4, "_phasefit.dat");
     
-    char a[40], a1[40], a2[40];
+    char a[40], a1[40], a2[40], a3[40];
     strncpy(a, datafile, strlen(datafile)-3);
     a[strlen(datafile)-4] = '\0';    
     memcpy (a1, a, strlen(a)+1);
     memcpy (a2, a, strlen(a)+1);
-  
-     strcat(a, str1);
-     strcat(a1, str2);
-     strcat(a2, str3);
+    memcpy (a3, a, strlen(a)+1);
+    strcat(a, str1);
+    strcat(a1, str2);
+    strcat(a2, str3);
+    strcat(a3, str4);
     
-     ofstream myfile1;
-     myfile1.open (a);
-     double *zpower, *phase, vpower, ipower, vphase, iphase;
-        /* we want to stop at 4Hz defined by FMAX */
+    ofstream myfile1;
+    myfile1.open (a);
+        /* Only print up to 4Hz defined by FMAX */
     int n = fmax_idx;
-    zpower = new double[n];
-    phase = new double[n];
     for(int i=0; i<n; i++) {
-        double vre = (vout[i][0]);
-        double vim = (vout[i][1]);
-        vpower = (sqrt((pow(vre, 2)) + (pow(vim, 2))))/N;
-        double ire = (iout[i][0]);
-        double iim = (iout[i][1]);
-        vphase = atan(vim/vre);
-        iphase = atan(iim/ire);
-        phase[i] = vphase - iphase;
-        ipower = (sqrt((pow(ire, 2)) + (pow(iim, 2))))/N;
-        zpower[i]  = fabs((vpower)/(ipower));
-        
-            // write this data to a file
-        myfile1 << freq[i] << "\t" << vpower << "\t" << ipower << "\t" << zpower[i] << "\t" << phase[i] << endl;
+        myfile1 << freq[i] << "\t" << Vs[i] << "\t" << Is[i] << "\t" << zpower[i] << "\t" << phase[i] << "\n";
     }
-     myfile1.close();
-
-     vector<double> newF (freq, freq + fmax_idx);
-     vector<double> newZ (zpower, zpower + fmax_idx);      
-     newF.erase (newF.begin(),newF.begin()+fmin_idx);
-     newZ.erase (newZ.begin(),newZ.begin()+fmin_idx);
+    myfile1 << endl;
+    myfile1.close();
     
+     vector<double> newF (freq, freq + fmax_idx);
+     vector<double> newZ (zpower, zpower + fmax_idx);
+     vector<double> newP (phase, phase + fmax_idx);
+     newF.erase (newF.begin(), newF.begin()+fmin_idx);
+     newZ.erase (newZ.begin(), newZ.begin()+fmin_idx);
+     newP.erase (newP.begin(), newP.begin()+fmin_idx);
+            
      fftw_free(vout);
      fftw_free(iout);
      fftw_destroy_plan(p1);
@@ -233,18 +201,79 @@ int main(int argc, char* argv[]) {
      delete [] zpower;
      delete [] phase;
      fftw_cleanup();
-    
-     // Note: A smoothing spline differs from an interpolating spline in
-     //     * that the resulting curve is not required to pass through
-     //     * each datapoint
+     fftw_cleanup_threads();
+
 
      //     compute a smoothing B-spline to get a nice impedance profile
      //    from this data set I can read all z-f stats that includes zmax, fmax, q, fwidth, z10
+     ofstream myfile2, myfile3;
+     myfile2.open (a1);
+     myfile3.open(a3);
+     vector<double> fdata (NUM_POINTS, 0);
+     vector<double> zdata (NUM_POINTS, 0);
+     vector<double> pdata (NUM_POINTS, 0);
+     fit_data(myfile2, newF, newZ, fdata, zdata, n);
+     fit_data(myfile3, newF, newP, fdata, pdata, n);
+     myfile2.close();
+     myfile3.close();
+     
+        /* now measure the z-f profile and write the stats to a file */
+     double zmax, z0, q, z10;
+     zmax = *max_element(zdata.begin(), zdata.end());
+     z0 = zdata[0];
+     z10 = zdata[NUM_POINTS-1];
+     q = zmax - z0;
+     
+     int zmax_idx = distance(zdata.begin(), max_element(zdata.begin(), zdata.end()));
+     double fmax = fdata[zmax_idx];
+     
+         // cout << "max value at " << distance(zdata.begin(), max_element(zdata.begin(), zdata.end()));
+         // cout << "Resonant frequency at " << newF[zmax_idx] << endl;
+     
+     double  zhalf = zmax - (zmax - z0)/2;
+     int zhalf_idx1; int zhalf_idx2;
+     zhalf_idx1 = 0;
+     zhalf_idx2 = 0;
+     
+     vector<double>::iterator zit;
+     for (zit = zdata.begin(); zit != zdata.end(); ++zit) {
+         if (*zit > zhalf) {
+                 /* when we find the first element greater than zhalf then break */
+             zhalf_idx1 = distance(zdata.begin(), zit);
+             break;
+         }
+     }
+         /* intialize iterator to end of vector and iterate backwards */
+     for (zit = zdata.end(); zit != zdata.begin(); --zit) {
+         if (*zit > zhalf) {
+                 /* when we find the first element greater than zhalf then break */
+             zhalf_idx2 =distance(zdata.begin(), zit);
+             break;
+         }
+     } 
+     double fhalfwidth = fdata[zhalf_idx2] - fdata[zhalf_idx1];
+     
+     ofstream myfile4;
+     myfile4.open (a2);
+     myfile4 << zmax << "\t" << fmax<< "\t" << q << "\t" << z10 << "\t" << fhalfwidth << endl;
+     myfile4.close();
+     
+         // cout << "Finished! Now use Grace to plot the results (http://plasma-gate.weizmann.ac.il/Grace/)" << endl;
+         // cout << "raw zf data can be found in " << a << endl;
+         // cout << "Smoothed zf data can be found in " << a1 << endl;
+         // cout << "zf stats  (zmax, fmax, q, z10, fhalfwidth) for this profile can be found in " << a2 << endl;
+     
+    return 0;
+}
 
+    /* Modify the underlying vector passed to the fit function. We would
+     * like to access the fit vectors afterward so we can extract
+     * statistics
+     */
+void fit_data(ostream &os, vector<double> &a, vector<double> &b, vector<double> &cvec, vector<double> &dvec, int n) {
     const size_t ncoeffs = NCOEFFS;
     const size_t nbreak = NBREAK;
-        //size_t iii, jjj;
-    
+
     gsl_bspline_workspace *bw;
     gsl_vector *B;
     double dy;
@@ -259,7 +288,7 @@ int main(int argc, char* argv[]) {
     r = gsl_rng_alloc(gsl_rng_default);
     
         /* allocate a cubic bspline workspace (k = 4) */
-    bw = gsl_bspline_alloc(4, nbreak);
+    bw = gsl_bspline_alloc(SPLINE_ORDER, nbreak);
     B = gsl_vector_alloc(ncoeffs);
      
     x = gsl_vector_alloc(n);
@@ -274,8 +303,8 @@ int main(int argc, char* argv[]) {
     
         /* this is the z-f data to be fitted */
     for (int i = 0; i < n; i++) {
-        f = newF[i];
-        z = newZ[i];
+        f = a[i];
+        z = b[i];
         sigma = 0.1 * z;
         dy = gsl_ran_gaussian(r, sigma);     
         zi = z+dy;
@@ -285,9 +314,8 @@ int main(int argc, char* argv[]) {
         gsl_vector_set(w, i, 1.0 / (sigma * sigma));
     }
 
-    //     /* use uniform breakpoints on [0, 15] */
-    gsl_bspline_knots_uniform(0.0, 20.0, bw);
-
+    //     /* use uniform breakpoints on [0, 4] */
+    gsl_bspline_knots_uniform(0, 35.0, bw);
 
         /* construct the fit matrix X */
     for (int i = 0; i < n; ++i) {
@@ -303,18 +331,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    //     /* do the fit */
+   /* do the fit */
     gsl_multifit_wlinear(X, w, y, c, cov, &chisq, mw);
 
-
-    ofstream myfile2;
-    myfile2.open (a1);
-    
     double xi, yi, yerr;
-    const int NUM_POINTS = 100;
-    vector<double> zdata (NUM_POINTS, 0);
-    vector<double> fdata (NUM_POINTS, 0);
-    
+
     for (int i = 0; i <= NUM_POINTS; i++) {
             /* C++ version of linspace :) */
         xi = FMIN + i * ( (FMAX - FMIN) / NUM_POINTS );
@@ -322,62 +343,11 @@ int main(int argc, char* argv[]) {
         gsl_bspline_eval(xi, B, bw);
         gsl_multifit_linear_est(B, c, cov, &yi, &yerr);
         
-        myfile2 <<  xi << "\t" << "\t" << yi  << endl;
-        fdata[i] = xi;
-        zdata[i] = yi;
-    }  
-    myfile2.close();
-
-        /* now measure the z-f profile and write the stats to a file */
-    double zmax, z0, q, z10;
-    ofstream myfile3;
-    myfile3.open (a2);
-        //vector<int>::iterator it;
-    zmax = *max_element(zdata.begin(), zdata.end());
-    z0 = zdata[0];
-    z10 = zdata[NUM_POINTS-1];
-    q = zmax - z0;
-    
-    int zmax_idx = distance(zdata.begin(), max_element(zdata.begin(), zdata.end()));
-    double fmax = fdata[zmax_idx];
-    
-    // cout << "max value at " << distance(zdata.begin(), max_element(zdata.begin(), zdata.end()));
-    // cout << "Resonant frequency at " << fdata[zmax_idx] << endl;
-
-    double  zhalf = zmax - (zmax - z0)/2;
-    int zhalf_idx1; int zhalf_idx2;
-    zhalf_idx1 = 0;
-    zhalf_idx2 = 0;
-        
-    vector<double>::iterator zit;
-    for (zit = zdata.begin(); zit != zdata.end(); ++zit) {
-        if (*zit > zhalf) {
-                /* when we find the first element greater than zhalf then break */
-                zhalf_idx1 = distance(zdata.begin(), zit);
-            break;
-        }
+        os <<  xi << "\t" << yi  << "\n";
+        cvec[i] = xi;
+        dvec[i] = yi;
     }
-        /* intialize iterator to end of vector and iterate backwards */
-    for (zit = zdata.end(); zit != zdata.begin(); --zit) {
-        if (*zit > zhalf) {
-                /* when we find the first element greater than zhalf then break */
-            zhalf_idx2 =distance(zdata.begin(), zit);
-            break;
-        }
-    } 
-    double fhalfwidth = fdata[zhalf_idx2] - fdata[zhalf_idx1];
-    
-    
-    myfile3 << zmax << "\t" << fmax<< "\t" << q << "\t" << z10 << "\t" << fhalfwidth << endl;
-
-    myfile3.close();
-
-    // cout << "Finished! Now use Grace to plot the results (http://plasma-gate.weizmann.ac.il/Grace/)" << endl;
-    // cout << "raw zf data can be found in " << a << endl;
-    // cout << "Smoothed zf data can be found in " << a1 << endl;
-    // cout << "zf stats  (zmax, fmax, q, z10, fhalfwidth) for this profile can be found in " << a2 << endl;
-
-    gsl_rng_free(r);
+     gsl_rng_free(r);
     gsl_bspline_free(bw);
     gsl_vector_free(B);
     gsl_vector_free(x);
@@ -387,13 +357,21 @@ int main(int argc, char* argv[]) {
     gsl_vector_free(w);
     gsl_matrix_free(cov);
     gsl_multifit_linear_free(mw);
-
-    return 0;
 }
 
 
+inline double average(vector<double> *vec) {
+    vector<double>::iterator it;
+    double sum = 0.0;
+    
+    for ( it=vec->begin() ; it < vec->end(); it++ ) {
+        sum += *it;
+     }
+    return sum/(vec->size());
+}
 
-
-
-
-
+inline  void subtract(vector<double> *vec, double value) {
+    for (int i = 0; i < (int)(vec->size()); i++) {
+        vec->at(i) -= value;
+    } 
+}
